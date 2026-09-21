@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en-NZ">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>Family Support · Demo</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to roster</a>
+<div class="demo-bar"><strong>DEMO ONLY</strong> · Fictional examples · Changes stay on this browser, not other phones. Do not enter private information.</div>
+<main class="app" id="content">
+  <header class="top">
+    <div><div class="eyebrow">Family Support</div><h1 id="viewTitle">Today</h1><div id="dateLabel" class="muted small"></div></div>
+    <div class="controls"><label class="small" for="currentPerson">Try as</label><select id="currentPerson" aria-label="Demo helper"></select><button class="btn" id="openTask">+ Add demo task</button></div>
+  </header>
+  <p id="storageNotice" class="notice hidden" role="status"></p>
+  <section data-view="today">
+    <div class="card hero heroRow"><div><div class="eyebrow">Today's coverage</div><h2 class="mt">Appointments, school and home</h2><p id="gapText" class="muted small"></p></div><div><div id="gapCount" class="big">0</div><div class="small muted">need an owner</div></div></div>
+    <div id="alert" class="section alert hidden"></div>
+    <div class="section grid grid3">
+      <article class="card"><h2>Adult</h2><p class="small muted">Appointment & practical support</p><div id="adultTasks" class="tasks"></div></article>
+      <article class="card"><h2>Child A</h2><p class="small muted">School & everyday routine</p><div id="childATasks" class="tasks"></div></article>
+      <article class="card"><h2>Child B</h2><p class="small muted">School & activities</p><div id="childBTasks" class="tasks"></div></article>
+    </div>
+    <article class="section card"><div class="personHead"><div><div class="eyebrow">Daily roster</div><h2 class="mt">Everything in time order</h2></div><button id="reset" class="btn light">Reset demo</button></div><div id="allTasks" class="tasks"></div></article>
+    <div class="section grid grid2">
+      <article class="card"><div class="eyebrow">Tomorrow</div><h2 id="tomorrowSummary" class="mt"></h2><div id="tomorrowTasks" class="tasks"></div></article>
+      <article class="card"><div class="eyebrow">Handover example</div><h2 class="mt">One place for practical updates</h2><p class="small muted">Example only, not a live message feed.</p><div class="row small"><b>Helper A</b><span>Lunchboxes and school bags are ready.</span></div><p class="notice">Private handovers, contacts and shared notifications will be added after individual sign-in and permissions.</p></article>
+    </div>
+  </section>
+  <section data-view="week" class="hidden">
+    <article class="card"><div class="personHead"><div><h2>Monday–Sunday</h2><p id="weekRange" class="small muted"></p></div><span id="weekGaps" class="badge"></span></div><div id="weekGrid" class="week"></div></article>
+    <div class="section grid grid2"><article class="card"><h2>Support team</h2><p class="small muted">Task counts, not a measure of effort or equal contribution.</p><div id="workload" class="pills"></div></article><article class="card"><h2>Needs an owner</h2><div id="weekUnassigned" class="tasks"></div></article></div>
+    <p class="notice section">This week view uses the same demo tasks as Today. Publishing or confirming a shared family week is not enabled.</p>
+  </section>
+  <section data-view="care" class="hidden">
+    <article class="card"><h2>Care coordination</h2><p class="small muted">Fictional appointment and practical-support tasks for today.</p><div id="careTasks" class="tasks"></div></article>
+    <div class="section grid grid2"><article class="card"><h2>Appointment-day checklist</h2><p class="small muted">Planning examples; these are not confirmed arrangements.</p><div class="list"><div class="row">Confirm outward and return transport</div><div class="row">Confirm school and childcare cover</div><div class="row">Organise food and household support</div><div class="row">Record changes in the shared handover</div></div></article><article class="card"><h2>Medication record</h2><p class="notice">Not enabled in this demo. No medication names, doses, administration records or reminders are stored.</p><p class="small muted">The later private version must record prescribed instructions without calculating doses or recommending treatment. Missing confirmation must never be interpreted as a missed dose.</p></article></div>
+  </section>
+  <section data-view="kids" class="hidden"><div class="grid grid2"><article class="card"><h2>Child A</h2><div id="kidsA" class="tasks"></div></article><article class="card"><h2>Child B</h2><div id="kidsB" class="tasks"></div></article></div><p class="notice section">Demo names and fictional times only. School names, authorised pickup arrangements, locations and routine exceptions belong in the later authenticated app.</p></section>
+  <section data-view="tasks" class="hidden"><article class="card"><div class="personHead"><h2>All demo tasks</h2><label class="small"><input type="checkbox" id="onlyGaps"> Unassigned only</label></div><div id="taskList" class="tasks"></div></article></section>
+  <section data-view="more" class="hidden"><div class="grid grid2"><article class="card"><h2>Shopping</h2><p class="small muted">Layout example, not a working shared list.</p><div class="row">Lunchbox fruit <span class="pill">Sample item</span></div></article><article class="card"><h2>Budget & expenses</h2><p class="small muted">Planned: weekly NZD budget, purchases, paid-by and reimbursement status. No real financial data is recorded.</p></article><article class="card"><h2>Contacts & availability</h2><p class="small muted">Planned after authentication. No contacts or real availability are included in the source code.</p></article><article class="card"><h2>What this version does</h2><p class="small">Add fictional tasks, try different helpers, claim tasks, mark them complete and see the same roster across views.</p><p class="notice">The helper selector is a demo control, not a login. There are no shared accounts or cross-device updates.</p></article></div></section>
+  <p class="privacy">Prototype only · No authentication · Local browser storage · No clinical decisions or reliable reminders</p>
+</main>
+<nav class="nav" aria-label="Main navigation"><div class="navIn"><button data-go="today">Today</button><button data-go="week">Week</button><button data-go="care">Care</button><button data-go="kids">Kids</button><button data-go="tasks">Tasks</button><button data-go="more">More</button></div></nav>
+<dialog id="taskDialog" aria-labelledby="dialogTitle"><form id="taskForm"><h2 id="dialogTitle">Add a fictional demo task</h2><p class="notice">Do not enter real medical, school or family details.</p><label>Task title<input name="title" maxlength="100" required placeholder="Example: Deliver dinner"></label><div class="grid grid2"><label>Date<input name="date" type="date" required></label><label>Time<input name="time" type="time" value="17:30" required></label></div><label>For<select name="category"><option>Household</option><option>Adult</option><option>Child A</option><option>Child B</option><option>School</option><option>Meals</option></select></label><label>Owner<select name="owner" id="taskOwner"></select></label><div class="actions section"><button type="button" id="closeTask" class="btn light">Cancel</button><button class="btn" type="submit">Save demo task</button></div></form></dialog>
+<div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+<noscript><p class="notice">Enable JavaScript to try the fictional demo. It is not a live family roster.</p></noscript>
+</body>
+</html>

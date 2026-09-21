@@ -1,0 +1,14 @@
+{
+  "name": "family-support-demo",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Fictional-data, local-only family roster prototype",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test": "node --test",
+    "check": "node --check server.mjs && node --check public/app.js"
+  }
+}
