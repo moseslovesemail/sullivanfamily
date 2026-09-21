@@ -1,6 +1,7 @@
-**
+*
 !Dockerfile
 !package.json
 !server.mjs
+!start.sh
 !public/
 !public/**

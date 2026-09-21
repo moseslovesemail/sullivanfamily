@@ -1,53 +1,36 @@
-# Family Support — demo bootstrap
+# Private Family Support — v2
 
-A lightweight, mobile-first prototype for coordinating appointments, school routines, meals and practical household support.
+A small, invitation-only family coordination application. This repository contains generic source code only. Never commit account invitations, encryption keys, actual addresses, children's routines or health information.
 
-**This is a fictional-data demo, not a private shared family app.** It has no authentication, database, cross-device sync, medication tracking or dependable reminders. Do not enter real health, child, school, location, contact or financial information.
+## Available
 
-## What works
+- Individual accounts with single-use invitations, usernames and passphrases.
+- Owner/backup coordinator, lead coordinator, family member and restricted helper roles.
+- A shared server-side roster with Today, Tomorrow, Week and Tasks views; refreshes every 15 seconds while open.
+- AM/PM display and explicit AM/PM time selection in the Pacific/Auckland timezone.
+- Assign, accept, claim, release and complete tasks. Changed arrangements require fresh confirmation. Version checks reject conflicting edits.
+- Shared operational handovers, privately saved locations and Google Maps directions links.
+- Account access revocation, replacement invitations, passphrase changes and owner-only roster export.
+- Google Calendar draft links. Optional read-only OAuth connection, private event preview and explicit event copying after Google credentials are configured.
 
-- Today, tomorrow, Monday–Sunday week view, care, kids and all-task views.
-- All roster views derive from one local task collection; gap and workload counts are calculated.
-- Switch between four fictional helpers, claim/release tasks and mark completion.
-- Add a fictional dated task and see it in the matching roster views.
-- Same-browser local persistence and reset. A helper selector is **not** a login.
-- Pacific/Auckland date handling and a mobile-friendly layout.
+## Important boundaries
 
-Shopping, budgets, contacts, availability, handovers, medication records and notifications are explicitly labelled as examples or future work. No invented clinical data or real family identifiers are included.
+Calendar copies are NOT live or two-way synchronisation. Later appointment changes and cancellations must be updated manually. Timed Google Calendar drafts use a one-hour placeholder; review their duration and destination calendar before saving.
 
-## Run
+No medication administration, medical records, emergency alerting, recurring task generation, automated reminders or full budget module is included in this release. Obtain consent before recording another person's private information. Helpers see only their own assigned tasks, including any notes on those tasks, and associated saved places.
 
-Node.js 22 or newer; no third-party runtime packages or npm install required.
+The app starts with an empty roster. Old browser-local demo tasks are deliberately not imported. Invitations and account names are bootstrapped from private deployment configuration, not this repository. Google account authorisation is separate from family sign-in.
 
-```sh
-npm start
-# Open http://localhost:3000
-npm run check
-npm test
-```
+## Runtime
 
-## Railway deployment configuration
+Node.js 22.13 or later; no npm runtime dependencies. SQLite is persisted on a Railway volume mounted at `/data`. Run exactly one application replica. Startup refuses to use ephemeral container storage. JSON records and Google tokens are encrypted using an independently configured 32-byte DATA_KEY; passphrases use salted scrypt hashes. This does not constitute a security certification.
 
-The root Dockerfile runs the tested dependency-free demo. Railway configuration is in `railway.json`.
+Required variables: NODE_ENV=production, APP_ORIGIN (the exact HTTPS origin), DATA_DIR=/data, DATA_KEY (32 random bytes encoded as base64), INITIAL_INVITES (initial names, roles and SHA-256 invitation-token hashes).
 
-- Repository root: `/`
-- Dockerfile: `Dockerfile`
-- Start command: `node server.mjs`
-- Health check: `/healthz`
-- `APP_MODE=demo` (default; every other value is rejected)
-- Railway supplies `PORT`; local default is `3000`.
-- Do not attach a real-data database to this build.
+INITIAL_INVITES is read only when the database is first created. It must include an owner. Actual single-use invitation tokens are distributed privately; only their hashes are configured. Retain DATA_KEY securely and separately from volume backups. Losing or replacing it prevents decryption of existing records.
 
-The files are deployable configuration, not evidence that a Railway deployment has happened. Hosting charges depend on the account and usage.
+Run `npm run check` for JavaScript syntax checks. Deployment health: GET /healthz should return status ok and mode private. GET /api/state without a session must be denied.
 
-## Privacy and technical boundaries
+## Operations
 
-This demo is safe to publish as generic source code, **not** safe for storing private family information. Keep the future family application repository private as an additional precaution, but repository privacy does not replace authentication and server-side authorisation.
-
-The server serves an exact asset allowlist, rejects writes, blocks embedding, sends no-store/noindex headers and uses a restrictive content security policy. These are defence-in-depth measures, not a login. Browser localStorage is not encrypted secure storage. There are no analytics, advertising, external fonts or AI services.
-
-Never commit private data, secrets, uploaded documents, exports or environment files. Demo changes are local browser data. Reset demo replaces those local changes only; it does not affect another person's phone.
-
-## Next build stage
-
-See `docs/production-plan.md` for invite-only access, shared PostgreSQL records, explicit permissions, recurrence exceptions, audit history and medication-record safeguards. The original Next.js scaffold is not deployed by this bootstrap; the default entrypoint is the executable demo above.
+See [Google and operations setup](docs/setup.md). Enable Railway volume backups and test recovery before relying on the system for real family coordination. Do not wipe or detach the database volume. Do not change the data key on an existing installation. The application is a small private pilot, not audited clinical software.

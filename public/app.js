@@ -1,150 +1,97 @@
 'use strict';
-const HELPERS = ['Helper A', 'Helper B', 'Helper C', 'Helper D'];
-const CATEGORIES = ['Adult', 'Child A', 'Child B', 'School', 'Meals', 'Household'];
-const STORAGE_KEY = 'family-support-fictional-demo-v2';
-const $ = selector => document.querySelector(selector);
-const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
-const nzToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const offsetDate = (date, days) => { const result = new Date(`${date}T12:00:00Z`); result.setUTCDate(result.getUTCDate() + days); return result.toISOString().slice(0, 10); };
-const weekStart = date => offsetDate(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
-const displayDate = date => new Intl.DateTimeFormat('en-NZ', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${date}T12:00:00Z`));
-const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
-
-function seed() {
-  const today = nzToday();
-  const start = weekStart(today);
-  const tasks = [];
-  let count = 0;
-  const add = (date, time, title, owner, category, done = false) => tasks.push({ id: `seed-${count++}`, date, time, title, owner, category, done });
-  // All examples are fictional. They are not a school calendar or confirmed care plan.
-  for (let day = 0; day < 14; day++) {
-    const date = offsetDate(start, day);
-    if (day % 7 < 5) {
-      add(date, '07:00', 'Prepare lunchboxes', 'Helper A', 'School', date === today);
-      add(date, '08:15', 'Child A school drop-off', 'Helper B', 'Child A');
-      add(date, '08:30', 'Child B school drop-off', 'Helper C', 'Child B');
-      add(date, '15:00', 'Child A school pickup', 'Helper A', 'Child A');
-      add(date, '15:15', 'Child B school pickup', day % 7 === 2 ? '' : 'Helper D', 'Child B');
-    }
-    add(date, '17:30', 'Family dinner', day % 7 === 4 ? '' : 'Helper B', 'Meals');
-  }
-  add(today, '10:30', 'Adult appointment transport', 'Helper D', 'Adult');
-  add(today, '12:30', 'Lunch and practical check-in', 'Helper B', 'Adult');
-  add(today, '16:30', 'Collect household supplies', '', 'Household');
-  return { version: 2, helper: HELPERS[0], tasks };
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const dateLabel=d=>new Intl.DateTimeFormat('en-NZ',{timeZone:'UTC',weekday:'short',day:'numeric',month:'short'}).format(new Date(`${d}T12:00Z`));
+const shift=(date,days)=>{const d=new Date(`${date}T12:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
+const weekStart=date=>shift(date,-((new Date(`${date}T12:00Z`).getUTCDay()+6)%7));
+function timeLabel(time){if(!time)return 'All day';const[h,m]=time.split(':').map(Number);return `${h%12||12}:${String(m).padStart(2,'0')} ${h<12?'AM':'PM'}`;}
+function clock(date){return new Intl.DateTimeFormat('en-NZ',{timeZone:'Pacific/Auckland',hour:'numeric',minute:'2-digit',hour12:true}).format(new Date(date)).replace(/am/i,'AM').replace(/pm/i,'PM');}
+let S=null,csrf='',view='today',weekOffset=0,joinToken='',calendarPage=null,eventPage=null,calendarEvents=[],polling=false;
+const isCoordinator=()=>S&&['owner','coordinator'].includes(S.user.role);
+const isHelper=()=>S?.user.role==='helper';
+const name=id=>S?.people.find(p=>p.id===id)?.name || 'Unassigned';
+const roles={owner:'Owner / backup coordinator',coordinator:'Lead coordinator',member:'Family member',helper:'Assigned tasks only'};
+function tell(message,error=false){$('#message').textContent=message;$('#message').classList.toggle('error',error);$('#message').hidden=false;}
+async function api(path,body){const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'content-type':'application/json','x-csrf-token':csrf},body:body===undefined?undefined:JSON.stringify(body),credentials:'same-origin',cache:'no-store'});const result=await response.json();if(!response.ok){if(response.status===401 && !['/api/login','/api/join'].includes(path))loggedOut();throw new Error(result.error || 'Request failed');}return result;}
+function loggedOut(){S=null;csrf='';$('#app').hidden=true;$('#auth').hidden=false;document.querySelectorAll('dialog[open]').forEach(d=>d.close());for(const id of ['todayTasks','tomorrowTasks','taskList','weekGrid','notes','people','places','googleEvents'])$('#'+id).replaceChildren();calendarEvents=[];$('#who').textContent='';$('#inviteLink').value='';document.querySelectorAll('form').forEach(f=>f.reset());}
+async function refresh(){if(polling)return;polling=true;try{S=await api('/api/state');csrf=S.csrf;$('#auth').hidden=true;$('#app').hidden=false;render();}finally{polling=false;}}
+const sorted=tasks=>[...tasks].sort((a,b)=>`${a.date} ${a.time||'00:00'}`.localeCompare(`${b.date} ${b.time||'00:00'}`));
+const onDate=date=>sorted(S.tasks.filter(t=>t.date===date));
+const gap=t=>!t.owner&&!t.done;
+function locationFor(task){const saved=S.places.find(p=>p.id===task.place);return saved?{label:saved.label,address:saved.address,notes:saved.notes}:{label:task.location,address:task.location,notes:''};}
+function maps(address){const url=new URL('https://www.google.com/maps/dir/');url.searchParams.set('api','1');url.searchParams.set('destination',address);url.searchParams.set('travelmode','driving');return url.href;}
+function taskRow(t,showDate=false){const mine=t.owner===S.user.id,manager=isCoordinator(),canEdit=manager||t.createdBy===S.user.id;const location=locationFor(t);const status=t.done?'Complete':!t.owner?'Needs someone':t.accepted?'Confirmed':'Awaiting confirmation';
+let actions='';if(gap(t)&&!isHelper())actions+=`<button data-action="claim" data-id="${esc(t.id)}" class="primary">I'll take this</button>`;if(mine&&!t.accepted&&!t.done)actions+=`<button data-action="accept" data-id="${esc(t.id)}" class="primary">Confirm I can do it</button>`;
+if((mine||manager)&&t.owner)actions+=`<button data-action="done" data-id="${esc(t.id)}">${t.done?'Reopen':'Done'}</button>${!t.done?`<button data-action="release" data-id="${esc(t.id)}">Release</button>`:''}`;
+if(canEdit&&!isHelper())actions+=`<button data-edit="${esc(t.id)}">Edit</button>`;
+return `<article class="task ${gap(t)?'gap':''}"><div class="time">${esc(timeLabel(t.time))}</div><div class="task-body"><h3>${esc(t.title)}</h3><p class="muted">${showDate?`${esc(dateLabel(t.date))} · `:''}${esc(t.category)}${t.owner?` · ${esc(name(t.owner))}`:''}</p><span class="status ${gap(t)?'uncovered':t.done||t.accepted?'confirmed':'pending'}">${status}</span>${location.address?`<p><a href="${esc(maps(location.address))}" target="_blank" rel="noopener noreferrer">${esc(location.label)} · Directions ↗</a></p>`:''}${t.notes?`<p class="task-note">${esc(t.notes)}</p>`:''}${t.source?'<p class="hint">Google Calendar copy · not live-synced</p>':''}<div class="actions">${actions}<button data-google-copy="${esc(t.id)}">Add to Google Calendar ↗</button>${canEdit&&!isHelper()?`<button class="quiet" data-action="delete" data-id="${esc(t.id)}">Delete</button>`:''}</div></div></article>`;}
+const list=(tasks,dates=false)=>tasks.length?sorted(tasks).map(t=>taskRow(t,dates)).join(''):'<p class="empty">Nothing listed here yet.</p>';
+function render(){if(!S)return;const today=onDate(S.today),gaps=today.filter(gap),pending=today.filter(t=>t.owner&&!t.accepted&&!t.done);
+$('#dateLabel').textContent=`${dateLabel(S.today)} · Pacific/Auckland`;$('#who').textContent=`${S.user.name} · ${roles[S.user.role]}`;
+$('#sync').textContent=`Shared roster · last refreshed ${clock(S.serverTime)} · updates every 15 seconds`;
+$('#coverage').textContent=gaps.length?`${gaps.length} thing${gaps.length===1?'':'s'} still need someone.`:pending.length?`${pending.length} assignment${pending.length===1?'':'s'} need confirmation.`:today.length?'Listed tasks are covered.':'A clear day starts here.';
+$('#coverageDetail').textContent=`${today.length} listed · ${today.filter(t=>t.done).length} complete · ${pending.length} awaiting confirmation`;
+$('#todayTasks').innerHTML=list(today);const tomorrow=onDate(shift(S.today,1));$('#tomorrowTasks').innerHTML=list(tomorrow);$('#tomorrowCoverage').textContent=`${tomorrow.length} listed · ${tomorrow.filter(gap).length} unassigned`;
+const start=shift(weekStart(S.today),weekOffset*7),days=Array.from({length:7},(_,i)=>shift(start,i)),week=S.tasks.filter(t=>days.includes(t.date));
+$('#weekTitle').textContent=`${dateLabel(start)} – ${dateLabel(days[6])}`;$('#workload').innerHTML=S.people.filter(p=>p.active).map(p=>`<span class="pill">${esc(p.name)} · ${week.filter(t=>t.owner===p.id).length}</span>`).join('');
+$('#weekGrid').innerHTML=days.map(d=>`<div class="day"><h3>${esc(dateLabel(d))}</h3>${onDate(d).map(t=>`<button class="week-task ${gap(t)?'gap':''}" data-week-task="${esc(t.id)}"><strong>${esc(timeLabel(t.time))}</strong><span>${esc(t.title)}</span><small>${esc(name(t.owner))}${t.done?' · Done':t.owner&&!t.accepted?' · Pending':''}</small></button>`).join('')||'<p class="empty">No tasks</p>'}</div>`).join('');
+const filter=$('#filter').value;$('#taskList').innerHTML=list(S.tasks.filter(t=>(filter==='past'?t.date<S.today:t.date>=S.today)&&(filter==='mine'?t.owner===S.user.id:filter==='gaps'?gap(t):filter==='pending'?t.owner&&!t.accepted&&!t.done:true)),true);
+$('#notes').innerHTML=S.notes.slice(-8).reverse().map(n=>`<article class="note"><strong>${esc(name(n.person))}</strong> <small>${esc(dateLabel(new Intl.DateTimeFormat('en-CA',{timeZone:'Pacific/Auckland',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(n.at))))} · ${esc(clock(n.at))}</small><p>${esc(n.text)}</p></article>`).join('');
+$('#handover').hidden=isHelper();$('#addTask').hidden=isHelper();$('#addPlace').hidden=!isCoordinator();$('#inviteButton').hidden=!isCoordinator();$('#exportData').hidden=S.user.role!=='owner';
+$('#places').innerHTML=S.places.map(p=>`<article class="card"><h3>${esc(p.label)}</h3><p>${esc(p.address)}</p><p class="hint">${esc(p.notes)}</p><div class="buttons"><a class="button primary" href="${esc(maps(p.address))}" target="_blank" rel="noopener noreferrer">Directions in Google Maps ↗</a>${isCoordinator()?`<button data-edit-place="${esc(p.id)}">Edit</button>`:''}</div></article>`).join('')||'<p class="empty">Your coordinator can save home, school, treatment and pharmacy addresses here.</p>';
+$('#people').innerHTML=S.people.map(p=>`<article class="card"><h3>${esc(p.name)}</h3><p>${roles[p.role]}</p><span class="status">${!p.active?'Access removed':p.joined?'Account activated':'Invitation pending'}</span>${isCoordinator()&&p.id!==S.user.id&&p.role!=='owner'&&(p.role!=='coordinator'||S.user.role==='owner')?`<div class="buttons"><button data-reinvite="${esc(p.id)}">${p.joined?'Reset access':'New invitation'}</button>${p.active?`<button data-revoke="${esc(p.id)}">Remove access</button>`:''}</div>`:''}</article>`).join('');
+$('#googleStatus').textContent=S.google.connected?`Connected privately${S.google.calendar?` · ${S.google.calendar.name}`:''}.`:S.google.configured?'Ready to connect your account.':'Calendar import is awaiting Google app setup. Google Calendar draft links already work.';
+$('#connectGoogle').hidden=S.google.connected||isHelper();$('#connectGoogle').disabled=!S.google.configured;$('#disconnectGoogle').hidden=!S.google.connected;$('#googleSetup').hidden=S.google.configured;$('#calendarTools').hidden=!S.google.connected||isHelper();$('#redirectUri').textContent=`${location.origin}/auth/google/callback`;
 }
-function validState(value) {
-  const ids = new Set();
-  return value && value.version === 2 && HELPERS.includes(value.helper) && Array.isArray(value.tasks) && value.tasks.length <= 1000 && value.tasks.every(task => {
-    if (!task || typeof task.id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(task.id) || ids.has(task.id)) return false;
-    ids.add(task.id);
-    return validDate(task.date) && typeof task.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(task.time) && typeof task.title === 'string' && task.title.trim().length > 0 && task.title.length <= 100 && (task.owner === '' || HELPERS.includes(task.owner)) && CATEGORIES.includes(task.category) && typeof task.done === 'boolean';
-  });
-}
-function notice(message) { $('#storageNotice').textContent = message; $('#storageNotice').classList.remove('hidden'); }
-function load() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return seed();
-    const parsed = JSON.parse(raw);
-    if (validState(parsed)) return parsed;
-    notice('The saved demo was invalid. Fictional examples have been restored.');
-  } catch { notice('Browser storage is unavailable or unreadable. Changes may not survive a reload.'); }
-  return seed();
-}
-let state = load();
-let currentView = 'today';
-function save() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-  catch { notice('This browser could not save the demo. Changes currently exist in this tab only.'); }
-}
-function announce(message) { $('#announcement').textContent = message; }
-const sorted = tasks => [...tasks].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-const forDate = date => sorted(state.tasks.filter(task => task.date === date));
-const isGap = task => !task.owner && !task.done;
-function row(task, dateVisible = false) {
-  const id = escapeHtml(task.id);
-  const actions = task.owner
-    ? `<span class="owner ${task.done ? 'done' : ''}">${escapeHtml(task.owner)}${task.done ? ' · Done' : ''}</span><button class="btn light" data-complete="${id}" aria-label="${task.done ? 'Reopen' : 'Mark complete'}: ${escapeHtml(task.title)}">${task.done ? 'Undo' : 'Done'}</button>${task.done ? '' : `<button class="btn light" data-release="${id}" aria-label="Release: ${escapeHtml(task.title)}">Release</button>`}`
-    : `<button class="claim" data-claim="${id}" aria-label="Claim: ${escapeHtml(task.title)}">I'll take this</button>`;
-  return `<div class="task"><div class="time">${escapeHtml(task.time)}</div><div><div class="title">${escapeHtml(task.title)}</div><div class="meta">${escapeHtml(task.category)}</div>${dateVisible ? `<span class="date-tag">${escapeHtml(displayDate(task.date))}</span>` : ''}</div><div class="actions">${actions}</div></div>`;
-}
-const taskList = (tasks, dates = false) => tasks.length ? sorted(tasks).map(task => row(task, dates)).join('') : '<p class="empty">No demo tasks in this view.</p>';
-function render() {
-  const today = nzToday();
-  const todays = forDate(today);
-  const gaps = todays.filter(isGap);
-  $('#dateLabel').textContent = `${displayDate(today)} · Pacific/Auckland`;
-  $('#gapCount').textContent = String(gaps.length);
-  $('#gapText').textContent = gaps.length ? `${gaps.length} demo task${gaps.length === 1 ? '' : 's'} still need an owner.` : 'All listed demo tasks have an owner. This is not confirmation of real arrangements.';
-  $('#alert').classList.toggle('hidden', !gaps.length);
-  $('#alert').textContent = gaps.map(task => `${task.title} · ${task.time}`).join(' / ');
-  const adult = todays.filter(task => task.category === 'Adult');
-  const childA = todays.filter(task => ['Child A', 'School'].includes(task.category));
-  const childB = todays.filter(task => ['Child B', 'School'].includes(task.category));
-  for (const [selector, tasks] of [['#adultTasks', adult], ['#careTasks', adult], ['#childATasks', childA], ['#kidsA', childA], ['#childBTasks', childB], ['#kidsB', childB], ['#allTasks', todays]]) $(selector).innerHTML = taskList(tasks);
-  const tomorrow = forDate(offsetDate(today, 1));
-  const tomorrowGaps = tomorrow.filter(isGap).length;
-  $('#tomorrowSummary').textContent = `${tomorrow.length} tasks · ${tomorrowGaps} need an owner`;
-  $('#tomorrowTasks').innerHTML = taskList(tomorrow);
-  const start = weekStart(today);
-  const days = Array.from({ length: 7 }, (_, index) => offsetDate(start, index));
-  const thisWeek = sorted(state.tasks.filter(task => days.includes(task.date)));
-  const weekGaps = thisWeek.filter(isGap);
-  $('#weekRange').textContent = `${displayDate(days[0])} – ${displayDate(days[6])}`;
-  $('#weekGaps').textContent = `${weekGaps.length} unassigned`;
-  $('#weekGrid').innerHTML = days.map(date => `<div class="day"><div class="dayName">${escapeHtml(displayDate(date))}</div>${forDate(date).map(task => `<div class="wi ${isGap(task) ? 'gap' : ''}"><b>${escapeHtml(task.time)}</b><br>${escapeHtml(task.title)}<br><span class="muted">${escapeHtml(task.owner || 'Needs someone')}${task.done ? ' · Done' : ''}</span></div>`).join('') || '<p class="empty">No tasks</p>'}</div>`).join('');
-  $('#workload').innerHTML = HELPERS.map(helper => `<span class="pill">${escapeHtml(helper)} · ${thisWeek.filter(task => task.owner === helper).length}</span>`).join('');
-  $('#weekUnassigned').innerHTML = taskList(weekGaps, true);
-  $('#taskList').innerHTML = taskList(state.tasks.filter(task => !$('#onlyGaps').checked || isGap(task)), true);
-  $('#currentPerson').value = state.helper;
-}
-function show(view) {
-  const titles = { today: 'Today', week: 'This week', care: 'Care', kids: 'School & routines', tasks: 'All tasks', more: 'Support tools' };
-  if (!titles[view]) return;
-  currentView = view;
-  document.querySelectorAll('[data-view]').forEach(section => section.classList.toggle('hidden', section.dataset.view !== view));
-  document.querySelectorAll('[data-go]').forEach(button => {
-    button.classList.toggle('active', button.dataset.go === view);
-    if (button.dataset.go === view) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
-  });
-  $('#viewTitle').textContent = titles[view];
-  window.scrollTo({ top: 0, behavior: 'instant' });
-}
-$('#currentPerson').innerHTML = HELPERS.map(helper => `<option>${helper}</option>`).join('');
-$('#taskOwner').innerHTML = '<option value="">Unassigned</option>' + HELPERS.map(helper => `<option>${helper}</option>`).join('');
-$('#currentPerson').addEventListener('change', event => { state.helper = event.target.value; save(); announce(`Trying as ${state.helper}. This is not sign-in.`); });
-$('#onlyGaps').addEventListener('change', render);
-document.addEventListener('click', event => {
-  const target = event.target.closest('button');
-  if (!target) return;
-  if (target.dataset.go) return show(target.dataset.go);
-  const id = target.dataset.claim || target.dataset.complete || target.dataset.release;
-  const task = state.tasks.find(item => item.id === id);
-  if (!task) return;
-  if (target.dataset.claim) { task.owner = state.helper; task.done = false; }
-  if (target.dataset.complete) task.done = !task.done;
-  if (target.dataset.release) { task.owner = ''; task.done = false; }
-  save(); render(); announce(`Updated demo task: ${task.title}. Saved on this browser only.`);
-});
-$('#reset').addEventListener('click', () => {
-  if (!window.confirm('Replace your local demo changes with the original fictional examples?')) return;
-  state = seed(); save(); render(); announce('Fictional demo reset.');
-});
-$('#openTask').addEventListener('click', () => {
-  const form = $('#taskForm');
-  form.reset(); form.elements.date.value = nzToday(); $('#taskDialog').showModal(); form.elements.title.focus();
-});
-$('#closeTask').addEventListener('click', () => $('#taskDialog').close());
-$('#taskForm').addEventListener('submit', event => {
-  event.preventDefault();
-  const values = Object.fromEntries(new FormData(event.target));
-  const task = { ...values, title: values.title.trim(), id: `local-${crypto.randomUUID()}`, done: false };
-  const next = { ...state, tasks: [...state.tasks, task] };
-  if (!validState(next)) { announce('Check the task details, or reset the demo if the 1,000-task limit is reached.'); return; }
-  state = next; save(); $('#taskDialog').close(); render(); announce('Demo task added to this browser.');
-});
-// Same-browser tabs can refresh their local demo; this is not cross-device sync.
-window.addEventListener('storage', event => { if (event.key === STORAGE_KEY) { state = load(); render(); } });
-window.addEventListener('focus', render);
-render(); show(currentView);
+function show(next){if(!['today','week','tasks','calendar','places','team'].includes(next))return;view=next;document.querySelectorAll('[data-view]').forEach(s=>s.hidden=s.dataset.view!==next);document.querySelectorAll('[data-go]').forEach(b=>{b.classList.toggle('active',b.dataset.go===next);if(b.dataset.go===next)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});$('#viewTitle').textContent=({today:'Today, together.',week:'The week ahead.',tasks:'What needs doing.',calendar:'Your calendar.',places:'Getting there.',team:'Your support team.'})[next];window.scrollTo({top:0,behavior:'instant'});}
+function taskForm(task=null){const f=$('#taskForm');f.reset();f.elements.id.value=task?.id||'';f.elements.version.value=task?.version||'';f.elements.date.value=task?.date||S.today;f.elements.title.value=task?.title||'';f.elements.category.value=task?.category||'Household';f.elements.notes.value=task?.notes||'';f.elements.location.value=task?.location||'';
+$('#taskOwner').innerHTML='<option value="">Needs someone</option>'+S.people.filter(p=>p.active&&(isCoordinator()||p.id===S.user.id)).map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');f.elements.owner.value=task?.owner||'';
+$('#taskPlace').innerHTML='<option value="">No saved place</option>'+S.places.map(p=>`<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');f.elements.place.value=task?.place||'';
+const[h,m]=(task?.time||'09:00').split(':').map(Number);f.elements.hour.value=h%12||12;f.elements.minute.value=m;f.elements.period.value=h<12?'AM':'PM';f.elements.allDay.checked=Boolean(task&&task.time==='');$('#timeFields').disabled=f.elements.allDay.checked;$('#taskTitle').textContent=task?'Edit task':'Add a task';$('#taskDialog').showModal();f.elements.title.focus();}
+function placeForm(place=null){const f=$('#placeForm');f.reset();for(const k of ['id','version','label','address','notes'])f.elements[k].value=place?.[k]||'';$('#placeDialog').showModal();}
+function showLink(result){$('#inviteLink').value=result.url;$('#linkName').textContent=`For ${result.name}. They will choose their own username and passphrase.`;$('#linkDialog').showModal();}
+function googleCopy(t){if(!confirm('This opens a Google Calendar draft, not a live-synced event. Timed drafts use a ONE-HOUR PLACEHOLDER: check the duration, destination calendar and privacy before saving. Continue?'))return;const url=new URL('https://calendar.google.com/calendar/render');url.searchParams.set('action','TEMPLATE');url.searchParams.set('text',t.title);url.searchParams.set('ctz','Pacific/Auckland');let start,end;if(t.time){const d=new Date(`${t.date}T${t.time}:00Z`);start=d.toISOString().replace(/[-:]/g,'').slice(0,15);d.setUTCHours(d.getUTCHours()+1);end=d.toISOString().replace(/[-:]/g,'').slice(0,15);}else{start=t.date.replace(/-/g,'');end=shift(t.date,1).replace(/-/g,'');}url.searchParams.set('dates',`${start}/${end}`);url.searchParams.set('details','Copied from the family roster. This is not live sync. Verify the start/end time and check the roster for updates.');const l=locationFor(t);if(l.address)url.searchParams.set('location',l.address);window.open(url.href,'_blank','noopener,noreferrer');}
+function bindForm(selector,fn){$(selector).addEventListener('submit',async e=>{e.preventDefault();const button=e.target.querySelector('button[type="submit"],button.primary,button:not([type])');if(button)button.disabled=true;try{await fn(e.target);}catch(error){tell(error.message,true);}finally{if(button)button.disabled=false;}});}
+$('#hour').innerHTML=Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');$('#minute').innerHTML=Array.from({length:60},(_,i)=>`<option value="${i}">${String(i).padStart(2,'0')}</option>`).join('');
+$('#taskForm').elements.allDay.addEventListener('change',e=>$('#timeFields').disabled=e.target.checked);
+bindForm('#authForm',async f=>{const body=Object.fromEntries(new FormData(f));if(joinToken)body.token=joinToken;await api(joinToken?'/api/join':'/api/login',body);joinToken='';f.reset();history.replaceState(null,'','/');$('#message').hidden=true;await refresh();show('today');});
+bindForm('#taskForm',async f=>{const values=Object.fromEntries(new FormData(f));const hour=(Number(values.hour)%12)+(values.period==='PM'?12:0);values.time=f.elements.allDay.checked?'':`${String(hour).padStart(2,'0')}:${String(values.minute).padStart(2,'0')}`;if(!values.id){delete values.id;delete values.version;}else values.version=Number(values.version);await api('/api/task',values);$('#taskDialog').close();await refresh();tell('Task saved to the shared roster.');});
+bindForm('#placeForm',async f=>{const values=Object.fromEntries(new FormData(f));if(!values.id){delete values.id;delete values.version;}else values.version=Number(values.version);await api('/api/place',values);$('#placeDialog').close();await refresh();tell('Location saved privately.');});
+bindForm('#noteForm',async f=>{await api('/api/note',Object.fromEntries(new FormData(f)));f.reset();await refresh();tell('Handover shared.');});
+bindForm('#inviteForm',async f=>{const result=await api('/api/invite',Object.fromEntries(new FormData(f)));$('#inviteDialog').close();f.reset();await refresh();showLink(result);});
+bindForm('#passwordForm',async f=>{await api('/api/password',Object.fromEntries(new FormData(f)));f.reset();await refresh();tell('Passphrase changed. Other sessions have been signed out.');});
+bindForm('#calendarForm',async()=>{await api('/api/google/select',{id:$('#calendarSelect').value});calendarEvents=[];$('#googleEvents').replaceChildren();await refresh();tell('Calendar selected. Load a preview to choose events.');});
+$('#filter').addEventListener('change',render);
+async function calendars(more=false){const r=await api('/api/google/calendars'+(more&&calendarPage?`?page=${encodeURIComponent(calendarPage)}`:''));if(!more)$('#calendarSelect').replaceChildren();for(const c of r.calendars){const o=document.createElement('option');o.value=c.id;o.textContent=c.name;$('#calendarSelect').append(o);}calendarPage=r.next;$('#moreCalendars').hidden=!calendarPage;}
+async function events(more=false){const r=await api('/api/google/events'+(more&&eventPage?`?page=${encodeURIComponent(eventPage)}`:''));calendarEvents=more?[...calendarEvents,...r.events]:r.events;eventPage=r.next;$('#moreEvents').hidden=!eventPage;$('#googleEvents').innerHTML=calendarEvents.map(e=>`<article class="note"><strong>${esc(e.title)}</strong><p>${e.start.dateTime?esc(new Intl.DateTimeFormat('en-NZ',{timeZone:'Pacific/Auckland',weekday:'short',day:'numeric',month:'short'}).format(new Date(e.start.dateTime)))+' · '+esc(clock(e.start.dateTime)):esc(dateLabel(e.start.date))+' · All day'}</p><p class="hint">${esc(e.location)}</p><button data-import="${esc(e.id)}">Copy this event to family roster</button></article>`).join('')||'<p class="empty">No events in the next 31 days.</p>';}
+document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;try{
+if(b.dataset.close)return $('#'+b.dataset.close).close();if(b.dataset.go)return show(b.dataset.go);
+if(b.id==='backLogin'){joinToken='';history.replaceState(null,'','/');$('#authTitle').textContent='Sign in';$('#authSubmit').textContent='Sign in';$('#inviteName').textContent='';b.hidden=true;return;}
+if(b.id==='logout'){await api('/api/logout',{});loggedOut();tell('Signed out.');return;}
+if(!S)return;
+if(b.id==='addTask')return taskForm();if(b.id==='addPlace')return placeForm();if(b.id==='refresh'){await refresh();tell('Roster refreshed.');return;}
+if(b.id==='prevWeek'||b.id==='nextWeek'){weekOffset+=b.id==='prevWeek'?-1:1;render();return;}
+if(b.id==='showGaps'){$('#filter').value='gaps';render();show('tasks');return;}
+if(b.dataset.edit)return taskForm(S.tasks.find(t=>t.id===b.dataset.edit));
+if(b.dataset.weekTask){const t=S.tasks.find(t=>t.id===b.dataset.weekTask);if(!isHelper()&&(isCoordinator()||t.createdBy===S.user.id))return taskForm(t);$('#filter').value='all';render();show('tasks');return;}
+if(b.dataset.editPlace)return placeForm(S.places.find(p=>p.id===b.dataset.editPlace));
+if(b.dataset.googleCopy)return googleCopy(S.tasks.find(t=>t.id===b.dataset.googleCopy));
+if(b.dataset.action){const t=S.tasks.find(t=>t.id===b.dataset.id);if(b.dataset.action==='delete'&&!confirm('Delete this task from the shared roster?'))return;b.disabled=true;await api('/api/task-action',{id:t.id,version:t.version,action:b.dataset.action});await refresh();tell('Shared roster updated.');return;}
+if(b.id==='inviteButton'){$('#inviteRole').innerHTML='<option value="member">Family member</option><option value="helper">Helper · assigned tasks only</option>'+(S.user.role==='owner'?'<option value="coordinator">Lead coordinator</option>':'');$('#inviteDialog').showModal();return;}
+if(b.dataset.reinvite){if(!confirm('Issue a new single-use invitation? Any existing sessions for this person will be signed out and older invitations cancelled.'))return;const result=await api('/api/invite',{person:b.dataset.reinvite});await refresh();showLink(result);return;}
+if(b.dataset.revoke){if(!confirm('Remove this person’s access now? Their unfinished assignments will become unassigned.'))return;await api('/api/revoke',{person:b.dataset.revoke});await refresh();tell('Access removed. Check the newly uncovered tasks.');return;}
+if(b.id==='copyLink'){try{await navigator.clipboard.writeText($('#inviteLink').value);tell('Private invitation copied.');}catch{$('#inviteLink').select();tell('Select and copy this private link.');}return;}
+if(b.id==='connectGoogle'){b.disabled=true;const result=await api('/api/google/connect',{});window.location.assign(result.url);return;}
+if(b.id==='disconnectGoogle'){if(!confirm('Disconnect Google? Imported roster copies will remain.'))return;const r=await api('/api/google/disconnect',{});calendarEvents=[];$('#googleEvents').replaceChildren();await refresh();tell(r.revoked?'Google disconnected.':'Local connection removed. Also revoke this app in your Google account permissions.',!r.revoked);return;}
+if(b.id==='loadCalendars'||b.id==='moreCalendars'){await calendars(b.id==='moreCalendars');return;}
+if(b.id==='loadEvents'||b.id==='moreEvents'){await events(b.id==='moreEvents');return;}
+if(b.dataset.import){if(!confirm('Copy this event’s title, time and location to the FAMILY roster? Other family members will be able to see it. Later Google changes will not sync.'))return;await api('/api/google/import',{event:b.dataset.import});await refresh();tell('Event copied. Confirm its transport and assign a helper in Tasks.');return;}
+if(b.id==='exportData'){if(!confirm('Download a private copy of family data? Store it safely and do not share it publicly.'))return;const result=await api('/api/export',{});const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`family-roster-${S.today}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return;}
+}catch(error){b.disabled=false;tell(error.message,true);if(S)try{await refresh();}catch{}}});
+async function init(){const fragment=new URLSearchParams(location.hash.slice(1));joinToken=fragment.get('join')||'';const calendar=fragment.get('calendar');if(location.hash)history.replaceState(null,'','/');
+try{if(joinToken){const invitation=await api('/api/invitation',{token:joinToken});$('#authTitle').textContent='Activate your account';$('#authSubmit').textContent='Create my account';$('#inviteName').textContent=`Welcome, ${invitation.name}. Access: ${roles[invitation.role]}.` ;$('#authForm').elements.password.autocomplete='new-password';$('#backLogin').hidden=false;return;}
+const result=await api('/api/me');if(result.user){csrf=result.csrf;await refresh();show(calendar?'calendar':'today');if(calendar)tell(calendar==='connected'?'Google connected. Choose the calendar you want to use.':'Google access was not granted.');}}
+catch(error){tell(error.message,true);$('#backLogin').hidden=!joinToken;}}
+setInterval(()=>{if(S&&!document.hidden)refresh().catch(()=>{if(S)$('#sync').textContent='Connection lost — this roster may be out of date. Refresh before relying on it.';});},15000);
+window.addEventListener('focus',()=>{if(S)refresh().catch(()=>tell('Unable to refresh. Confirm urgent arrangements directly.',true));});
+init();
